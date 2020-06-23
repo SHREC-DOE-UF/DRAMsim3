@@ -68,11 +68,19 @@ enum class HMCReqType {
     P_BWR,  // bit write, 8B mask, 8B value, read update write
     BWR8R,  // bit write with return
     SWAP16,  // swap imm operand and mem operand, read then write
-    SIZE
+    SIZE,
+    //Adding Commands for CiM operations
+    CIM_FETCH,
+    CIM_STORE,
+    CIM_ADD,
+    CIM_SWAP,
+    CIM_XOR
 };
 
-enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE };
+//enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE };
 
+//Modifiying for CiM
+enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE, CIM_RS };
 // for future use
 enum class HMCLinkType { HOST_TO_DEV, DEV_TO_DEV, SIZE };
 
