@@ -2,11 +2,12 @@
 
 namespace dramsim3 {
 
-HMCRequest::HMCRequest(HMCReqType req_type, uint64_t hex_addr, int vault)
-    : type(req_type), mem_operand(hex_addr), vault(vault) {
+HMCRequest::HMCRequest(HMCReqType req_type, uint64_t hex_addr1, int vault, uint64_t hex_addr2)
+    : type(req_type), mem_operand1(hex_addr1), mem_operand2(hex_addr2), vault(vault) {
     is_write = type >= HMCReqType::WR0 && type <= HMCReqType::P_WR256;
     // given that vaults could be 16 (Gen1) or 32(Gen2), using % 4
     // to partition vaults to quads
+   
     quad = vault % 4;
     switch (req_type) {
         case HMCReqType::RD0:
@@ -394,6 +395,40 @@ bool HMCMemorySystem::AddTransaction(uint64_t hex_addr, bool is_write) {
     return InsertHMCReq(req);
 }
 
+/*Overloading for CIM*/
+bool HMCMemorySystem::WillAcceptTransaction(Transaction& trans) const {
+    /* */
+    /* CIM for certain commands we need two or more request*/
+    int no_of_requests = 1;
+    if (trans.is_cim_add || trans.is_cim_xor) {
+        no_of_requests = 3; //2 CIM_FETCH and 1 CIM_STORE
+    }
+    if (trans.is_cim_swap)
+    {
+        no_of_requests = 4; //2 CIM_FETCH and 2 CIM_STORE
+    }
+
+    /* */
+    bool insertable = false;
+    if(trans.is_cim_add || trans.is_cim_xor)
+    for (auto link_queue = link_req_queues_.begin();
+        link_queue != link_req_queues_.end(); link_queue++) {
+        if ((*link_queue).size()+ no_of_requests < queue_depth_) {
+            insertable = true;
+            break;
+        }
+    }
+
+    return insertable;
+}
+bool HMCMemorySystem::AddTransaction(Transaction& trans) {
+    // to be compatible with other protocol we have this interface
+    // when using this intreface the size of each transaction will be block_size
+    return true;
+}
+
+/* ****** */
+
 bool HMCMemorySystem::InsertReqToLink(HMCRequest *req, int link) {
     // These things need to happen when an HMC request is inserted to a link:
     // 1. check if link queue full
@@ -404,7 +439,7 @@ bool HMCMemorySystem::InsertReqToLink(HMCRequest *req, int link) {
         req->link = link;
         link_req_queues_[link].push_back(req);
         HMCResponse *resp =
-            new HMCResponse(req->mem_operand, req->type, link, req->quad);
+            new HMCResponse(req->mem_operand1, req->type, link, req->quad);
         resp_lookup_table_.insert(
             std::pair<uint64_t, HMCResponse *>(resp->resp_id, resp));
         link_age_counter_[link] = 1;
@@ -448,7 +483,7 @@ void HMCMemorySystem::DrainRequests() {
             quad_resp_queues_[i].size() < queue_depth_) {
             HMCRequest *req = quad_req_queues_[i].front();
             if (req->exit_time <= logic_clk_) {
-                if (ctrls_[req->vault]->WillAcceptTransaction(req->mem_operand,
+                if (ctrls_[req->vault]->WillAcceptTransaction(req->mem_operand1,
                                                               req->is_write)) {
                     InsertReqToDRAM(req);
                     delete (req);
@@ -542,6 +577,7 @@ void HMCMemorySystem::DrainResponses() {
 }
 
 void HMCMemorySystem::DRAMClockTick() {
+
     for (size_t i = 0; i < ctrls_.size(); i++) {
         // look ahead and return earlier
         while (true) {
@@ -613,7 +649,7 @@ std::vector<int> HMCMemorySystem::BuildAgeQueue(std::vector<int> &age_counter) {
 }
 
 void HMCMemorySystem::InsertReqToDRAM(HMCRequest *req) {
-    Transaction trans(req->mem_operand, req->is_write);
+    Transaction trans(req->mem_operand1, req->is_write);
     ctrls_[req->vault]->AddTransaction(trans);
     return;
 }

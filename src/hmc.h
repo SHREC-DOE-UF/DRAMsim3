@@ -84,11 +84,14 @@ enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE, CIM_RS };
 // for future use
 enum class HMCLinkType { HOST_TO_DEV, DEV_TO_DEV, SIZE };
 
+//The new request can contain two address values depending on the type. CiM operations
+//mostly have two addresses which are used as operands.
 class HMCRequest {
    public:
-    HMCRequest(HMCReqType req_type, uint64_t hex_addr, int vault);
+    HMCRequest(HMCReqType req_type, uint64_t hex_addr1,int vault, uint64_t hex_addr2=0);
     HMCReqType type;
-    uint64_t mem_operand;
+    uint64_t mem_operand1;
+    uint64_t mem_operand2;
     int link;
     int quad;
     int vault;
@@ -97,7 +100,6 @@ class HMCRequest {
     // this exit_time is the time to exit xbar to vaults
     uint64_t exit_time;
 };
-
 class HMCResponse {
    public:
     HMCResponse(uint64_t id, HMCReqType reqtype, int dest_link, int src_quad);
@@ -126,6 +128,11 @@ class HMCMemorySystem : public BaseDRAMSystem {
     bool AddTransaction(uint64_t hex_addr, bool is_write) override;
     bool InsertReqToLink(HMCRequest* req, int link);
     bool InsertHMCReq(HMCRequest* req);
+    //Overloading functions for CIM
+    bool WillAcceptTransaction(Transaction& trans) const override;
+    bool AddTransaction(Transaction& trans) override;
+    
+    
 
    private:
     uint64_t logic_clk_, ps_per_dram_, ps_per_logic_, logic_ps_, dram_ps_;
