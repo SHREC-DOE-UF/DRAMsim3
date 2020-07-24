@@ -78,10 +78,9 @@ void TraceBasedCPU::ClockTick() {
             trace_file_ >> trans_;
         }
         if (trans_.added_cycle <= clk_) {
-            get_next_ = memory_system_.WillAcceptTransaction(trans_.addr,
-                                                             trans_.is_write);
+            get_next_ = memory_system_.WillAcceptTransaction(trans_);
             if (get_next_) {
-                memory_system_.AddTransaction(trans_.addr, trans_.is_write);
+                memory_system_.AddTransaction(trans_);
             }
         }
     }

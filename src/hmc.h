@@ -131,7 +131,7 @@ class HMCMemorySystem : public BaseDRAMSystem {
     //Overloading functions for CIM
     bool WillAcceptTransaction(Transaction& trans) const override;
     bool AddTransaction(Transaction& trans) override;
-    
+    bool ConvertCIMtoRW(Transaction& trans);
     
 
    private:

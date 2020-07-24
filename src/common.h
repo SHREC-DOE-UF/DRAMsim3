@@ -63,6 +63,7 @@ enum class CommandType {
     SREF_ENTER,
     SREF_EXIT,
     SIZE
+    
 };
 
 struct Command {
@@ -90,6 +91,7 @@ struct Command {
                cmd_type == CommandType::SREF_ENTER ||
                cmd_type == CommandType::SREF_EXIT;
     }
+    
     CommandType cmd_type;
     Address addr;
     uint64_t hex_addr;
@@ -119,10 +121,19 @@ struct Transaction {
     uint64_t addr;
     uint64_t added_cycle;
     uint64_t complete_cycle;
-    bool is_write;
-
+    
     friend std::ostream& operator<<(std::ostream& os, const Transaction& trans);
     friend std::istream& operator>>(std::istream& is, Transaction& trans);
+    
+    //Adding member variables for CIM operations
+    uint64_t addr2; //the address of the second operand for CIM_Add and CIM_xor operations
+    bool is_write;
+    bool is_cim_add;
+    bool is_cim_swap;
+    bool is_cim_xor;
+    bool is_cim_fetch;
+    bool is_cim_store;
+
 };
 
 }  // namespace dramsim3

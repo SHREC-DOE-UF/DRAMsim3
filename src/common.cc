@@ -35,9 +35,21 @@ std::ostream& operator<<(std::ostream& os, const Transaction& trans) {
 std::istream& operator>>(std::istream& is, Transaction& trans) {
     std::unordered_set<std::string> write_types = {"WRITE", "write", "P_MEM_WR",
                                                    "BOFF"};
+    /*Some CIM operations have two addresses. Ex: CIM_ADD, CIM_XOR, CIM_SWAP*/
+    std::unordered_set<std::string> cim_operations_with_two_addresses = {"CIM_ADD","CIM_SWAP","CIM_XOR" };
+    std::unordered_set<std::string> cim_operations = { "CIM_ADD","CIM_SWAP","CIM_XOR" };
     std::string mem_op;
-    is >> std::hex >> trans.addr >> mem_op >> std::dec >> trans.added_cycle;
+    is >> std::hex >> trans.addr ;
+    is >> mem_op;
+    if (cim_operations_with_two_addresses.count(mem_op) == 1)//Store the second address
+        is >> std::hex >> trans.addr2;
+    is>> std::dec >> trans.added_cycle;
     trans.is_write = write_types.count(mem_op) == 1;
+    trans.is_cim_add = mem_op == "CIM_ADD";
+    trans.is_cim_swap = mem_op == "CIM_SWAP";
+    trans.is_cim_xor = mem_op == "CIM_XOR";
+    trans.is_cim_fetch = mem_op == "CIM_FETCH";
+    trans.is_cim_store = mem_op == "CIM_STORE";
     return is;
 }
 

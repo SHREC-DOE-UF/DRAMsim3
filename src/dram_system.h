@@ -31,6 +31,10 @@ class BaseDRAMSystem {
     virtual bool WillAcceptTransaction(uint64_t hex_addr,
                                        bool is_write) const = 0;
     virtual bool AddTransaction(uint64_t hex_addr, bool is_write) = 0;
+    //Overloading for CIM
+    virtual bool WillAcceptTransaction(Transaction& trans) const = 0;
+    virtual bool AddTransaction(Transaction& trans) = 0;
+    
     virtual void ClockTick() = 0;
     int GetChannel(uint64_t hex_addr) const;
 
@@ -66,6 +70,10 @@ class JedecDRAMSystem : public BaseDRAMSystem {
     ~JedecDRAMSystem();
     bool WillAcceptTransaction(uint64_t hex_addr, bool is_write) const override;
     bool AddTransaction(uint64_t hex_addr, bool is_write) override;
+    //Overloading for CIM
+    bool WillAcceptTransaction(Transaction& trans) const override;
+    bool AddTransaction(Transaction& trans) ;
+    
     void ClockTick() override;
 };
 

@@ -104,6 +104,13 @@ HMCRequest::HMCRequest(HMCReqType req_type, uint64_t hex_addr1, int vault, uint6
         case HMCReqType::SWAP16:
             flits = 2;
             break;
+        case HMCReqType::CIM_FETCH:
+        case HMCReqType::CIM_STORE:
+        case HMCReqType::CIM_ADD:
+        case HMCReqType::CIM_SWAP:
+        case HMCReqType::CIM_XOR:
+            flits = 2;
+            break;
         default:
             AbruptExit(__FILE__, __LINE__);
             break;
@@ -233,6 +240,14 @@ HMCResponse::HMCResponse(uint64_t id, HMCReqType req_type, int dest_link,
         case HMCReqType::SWAP16:
             type = HMCRespType::RD_RS;
             flits = 2;
+            break;
+        case HMCReqType::CIM_FETCH:
+        case HMCReqType::CIM_STORE:
+        case HMCReqType::CIM_ADD:
+        case HMCReqType::CIM_SWAP:
+        case HMCReqType::CIM_XOR:
+            type = HMCRespType::WR_RS;
+            flits = 1;
             break;
         default:
             AbruptExit(__FILE__, __LINE__);
@@ -410,7 +425,6 @@ bool HMCMemorySystem::WillAcceptTransaction(Transaction& trans) const {
 
     /* */
     bool insertable = false;
-    if(trans.is_cim_add || trans.is_cim_xor)
     for (auto link_queue = link_req_queues_.begin();
         link_queue != link_req_queues_.end(); link_queue++) {
         if ((*link_queue).size()+ no_of_requests < queue_depth_) {
@@ -421,10 +435,103 @@ bool HMCMemorySystem::WillAcceptTransaction(Transaction& trans) const {
 
     return insertable;
 }
+
+/*Overloading for CIM*/
 bool HMCMemorySystem::AddTransaction(Transaction& trans) {
     // to be compatible with other protocol we have this interface
     // when using this intreface the size of each transaction will be block_size
-    return true;
+    HMCReqType req_type;
+
+    if (trans.is_cim_fetch) {
+    req_type = HMCReqType::CIM_FETCH;
+    int vault = GetChannel(trans.addr);
+    HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
+    return InsertHMCReq(req);
+    }
+    else if (trans.is_cim_store) {
+    req_type = HMCReqType::CIM_STORE;
+    int vault = GetChannel(trans.addr);
+    HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
+    return InsertHMCReq(req);
+    }
+    else if (trans.is_cim_xor) { // Xor requires one cim_fetch and one cim_store operation
+        bool ret = true;
+        req_type = HMCReqType::CIM_FETCH;
+        int vault = GetChannel(trans.addr);
+        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
+        ret = InsertHMCReq(req);
+        req_type = HMCReqType::CIM_STORE;
+        vault = GetChannel(trans.addr);
+        req = new HMCRequest(req_type, trans.addr, vault);
+        ret &= InsertHMCReq(req);
+        return ret;
+    }
+    else if (trans.is_cim_add) { // add requires two cim_fetch and one cim_store operation
+        bool ret = true;
+        req_type = HMCReqType::CIM_FETCH;
+        int vault = GetChannel(trans.addr);
+        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
+        ret = InsertHMCReq(req);
+        req_type = HMCReqType::CIM_FETCH;
+        vault = GetChannel(trans.addr);
+        req = new HMCRequest(req_type, trans.addr, vault);
+        ret &= InsertHMCReq(req);
+        req_type = HMCReqType::CIM_STORE;
+        vault = GetChannel(trans.addr);
+        req = new HMCRequest(req_type, trans.addr, vault);
+        ret &= InsertHMCReq(req);
+        return ret;
+    }
+    if (trans.is_write) {
+        switch (config_.block_size) {
+        case 0:
+            req_type = HMCReqType::WR0;
+            break;
+        case 32:
+            req_type = HMCReqType::WR32;
+            break;
+        case 64:
+            req_type = HMCReqType::WR64;
+            break;
+        case 128:
+            req_type = HMCReqType::WR128;
+            break;
+        case 256:
+            req_type = HMCReqType::WR256;
+            break;
+        default:
+            req_type = HMCReqType::SIZE;
+            AbruptExit(__FILE__, __LINE__);
+            break;
+        }
+    }
+
+    else {
+        switch (config_.block_size) {
+        case 0:
+            req_type = HMCReqType::RD0;
+            break;
+        case 32:
+            req_type = HMCReqType::RD32;
+            break;
+        case 64:
+            req_type = HMCReqType::RD64;
+            break;
+        case 128:
+            req_type = HMCReqType::RD128;
+            break;
+        case 256:
+            req_type = HMCReqType::RD256;
+            break;
+        default:
+            req_type = HMCReqType::SIZE;
+            AbruptExit(__FILE__, __LINE__);
+            break;
+        }
+    }
+    int vault = GetChannel(trans.addr);
+    HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
+    return InsertHMCReq(req);
 }
 
 /* ****** */
@@ -438,13 +545,15 @@ bool HMCMemorySystem::InsertReqToLink(HMCRequest *req, int link) {
     if (link_req_queues_[link].size() < queue_depth_) {
         req->link = link;
         link_req_queues_[link].push_back(req);
-        HMCResponse *resp =
-            new HMCResponse(req->mem_operand1, req->type, link, req->quad);
-        resp_lookup_table_.insert(
-            std::pair<uint64_t, HMCResponse *>(resp->resp_id, resp));
-        link_age_counter_[link] = 1;
-        // stats_.interarrival_latency.AddValue(clk_ - last_req_clk_);
-        last_req_clk_ = clk_;
+            HMCResponse* resp =
+                new HMCResponse(req->mem_operand1, req->type, link, req->quad);
+            resp_lookup_table_.insert(
+                std::pair<uint64_t, HMCResponse*>(resp->resp_id, resp));
+
+
+            link_age_counter_[link] = 1;
+            // stats_.interarrival_latency.AddValue(clk_ - last_req_clk_);
+            last_req_clk_ = clk_;
         return true;
     } else {
         return false;
@@ -659,7 +768,6 @@ void HMCMemorySystem::VaultCallback(uint64_t req_id) {
     // requests the vaults cannot directly talk to the CPU so this callback will
     // be passed to the vaults and is responsible to put the responses back to
     // response queues
-
     auto it = resp_lookup_table_.find(req_id);
     HMCResponse *resp = it->second;
     // all data from dram received, put packet in xbar and return
@@ -670,4 +778,7 @@ void HMCMemorySystem::VaultCallback(uint64_t req_id) {
     return;
 }
 
+bool ConvertCIMtoRW(Transaction& trans) {
+    return true;
+}
 }  // namespace dramsim3

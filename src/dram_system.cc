@@ -143,8 +143,18 @@ bool JedecDRAMSystem::AddTransaction(uint64_t hex_addr, bool is_write) {
     last_req_clk_ = clk_;
     return ok;
 }
+//Overloading for CIM. Will always return False since we are not implementing 
+//CIM for memory systems other than HMC
+bool JedecDRAMSystem::WillAcceptTransaction(Transaction& trans) const {
+    return false;
+}
+
+bool JedecDRAMSystem::AddTransaction(Transaction& trans) {
+    return false;
+}
 
 void JedecDRAMSystem::ClockTick() {
+
     for (size_t i = 0; i < ctrls_.size(); i++) {
         // look ahead and return earlier
         while (true) {

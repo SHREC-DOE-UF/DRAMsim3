@@ -29,6 +29,11 @@ class MemorySystem {
 
     bool WillAcceptTransaction(uint64_t hex_addr, bool is_write) const;
     bool AddTransaction(uint64_t hex_addr, bool is_write);
+    
+    //Rewriting the above two functions for CIM in HMC
+    //The logic is implemented in the controller and hence the deduction of the transaction must happen in hmc.cc
+    bool WillAcceptTransaction(Transaction& trans) const;
+    bool AddTransaction(Transaction& trans);    
 
    private:
     // These have to be pointers because Gem5 will try to push this object

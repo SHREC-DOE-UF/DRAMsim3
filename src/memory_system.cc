@@ -55,6 +55,19 @@ MemorySystem* GetMemorySystem(const std::string &config_file, const std::string 
                  std::function<void(uint64_t)> write_callback) {
     return new MemorySystem(config_file, output_dir, read_callback, write_callback);
 }
+
+/*Rewrting WillAcceptTransaction and AddTransaction for CIM operations in HMC*/
+bool MemorySystem::WillAcceptTransaction(Transaction& trans) const {
+    if (config_->IsHMC())
+        return dram_system_->WillAcceptTransaction(trans);
+    return dram_system_->WillAcceptTransaction(trans.addr, trans.is_write);
+}
+bool MemorySystem::AddTransaction(Transaction& trans){
+    if (config_->IsHMC())
+        return dram_system_->AddTransaction(trans);
+    return dram_system_->AddTransaction(trans.addr, trans.is_write);
+}
+
 }  // namespace dramsim3
 
 // This function can be used by autoconf AC_CHECK_LIB since
