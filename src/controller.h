@@ -19,6 +19,7 @@ namespace dramsim3 {
 
 enum class RowBufPolicy { OPEN_PAGE, CLOSE_PAGE, SIZE };
 
+
 class Controller {
    public:
 #ifdef THERMAL
@@ -29,6 +30,9 @@ class Controller {
 #endif  // THERMAL
     void ClockTick();
     bool WillAcceptTransaction(uint64_t hex_addr, bool is_write) const;
+    /*Overloading for CIM */
+    bool WillAcceptTransaction(uint64_t hex_addr,int no_of_reads, int no_of_writes) const; //CIM instructions can have more than 1 read or write transactions
+    /* ************** */
     bool AddTransaction(Transaction trans);
     int QueueUsage() const;
     // Stats output
@@ -38,7 +42,9 @@ class Controller {
     std::pair<uint64_t, int> ReturnDoneTrans(uint64_t clock);
 
     int channel_id_;
-
+    std::unordered_map<uint64_t,int> cim_transactions;
+    std::unordered_map<int,uint64_t> cim_transactions_start_cycle;
+    std::unordered_map<int,uint64_t> cim_transactions_complete_cycle;
    private:
     uint64_t clk_;
     const Config &config_;

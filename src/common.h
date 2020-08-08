@@ -6,7 +6,8 @@
 #include <vector>
 
 namespace dramsim3 {
-
+#define CIM 2
+enum CIM_OPERATIONS{CIM_FETCH,CIM_STORE,CIM_ADD,CIM_XOR,CIM_SWAP};
 struct Address {
     Address()
         : channel(-1), rank(-1), bankgroup(-1), bank(-1), row(-1), column(-1) {}
@@ -112,12 +113,39 @@ struct Transaction {
         : addr(addr),
           added_cycle(0),
           complete_cycle(0),
-          is_write(is_write) {}
+          addr2(0),
+          addr3(0),
+          req_id(0),
+          is_write(is_write),
+          is_read(!is_write) {is_cim=0;}
     Transaction(const Transaction& tran)
         : addr(tran.addr),
           added_cycle(tran.added_cycle),
           complete_cycle(tran.complete_cycle),
-          is_write(tran.is_write) {}
+          is_write(tran.is_write) {
+          req_id = tran.req_id;
+          is_read = tran.is_read;
+          is_cim_fetch = tran.is_cim_fetch;
+          is_cim_store = tran.is_cim_store;
+          is_cim_add = tran.is_cim_add;
+          is_cim_xor = tran.is_cim_xor;
+          is_cim_swap = tran.is_cim_swap;
+          is_cim = tran.is_cim;
+          }
+          
+    //Creating new constructors for CIM
+    //For CIM transactions with one memory operands
+    Transaction(uint64_t addr1, bool is_cim_fetch, bool is_cim_store)
+                : addr(addr1),added_cycle(0),complete_cycle(0),
+                 addr2(0),addr3(0), is_write(false), is_read(false), is_cim_fetch(is_cim_fetch),
+                is_cim_store(is_cim_store), is_cim_add(false), is_cim_swap(false),is_cim_xor(false) {is_cim=0;} 
+    //For CIM transactions with two memory operands
+    Transaction(uint64_t addr1, uint64_t addr2,bool is_cim_add, bool is_cim_swap, bool is_cim_xor)
+                : addr(addr1),added_cycle(0),complete_cycle(0),
+                 addr2(addr2),addr3(addr3), is_write(false), is_read(false), is_cim_fetch(false),
+                is_cim_store(false), is_cim_add(is_cim_add), is_cim_swap(is_cim_swap),is_cim_xor(is_cim_xor) {is_cim=0;}
+                
+                
     uint64_t addr;
     uint64_t added_cycle;
     uint64_t complete_cycle;
@@ -127,13 +155,17 @@ struct Transaction {
     
     //Adding member variables for CIM operations
     uint64_t addr2; //the address of the second operand for CIM_Add and CIM_xor operations
+    uint64_t addr3;
+    uint64_t req_id;
     bool is_write;
+    bool is_read;
+    bool is_cim_fetch;
+    bool is_cim_store;
     bool is_cim_add;
     bool is_cim_swap;
     bool is_cim_xor;
-    bool is_cim_fetch;
-    bool is_cim_store;
-
+    bool is_cim; 
+    
 };
 
 }  // namespace dramsim3

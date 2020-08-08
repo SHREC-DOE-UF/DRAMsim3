@@ -70,7 +70,7 @@ enum class HMCReqType {
     SWAP16,  // swap imm operand and mem operand, read then write
     SIZE,
     //Adding Commands for CiM operations
-    CIM_FETCH,
+     CIM_FETCH,
     CIM_STORE,
     CIM_ADD,
     CIM_SWAP,
@@ -80,7 +80,7 @@ enum class HMCReqType {
 //enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE };
 
 //Modifiying for CiM
-enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE, CIM_RS };
+enum class HMCRespType { NONE, RD_RS, WR_RS, ERR, SIZE, CIM_FETCH_RS, CIM_STORE_RS, CIM_ADD_RS,CIM_SWAP_RS, CIM_XOR_RS }; //Adding new response types
 // for future use
 enum class HMCLinkType { HOST_TO_DEV, DEV_TO_DEV, SIZE };
 
@@ -88,15 +88,18 @@ enum class HMCLinkType { HOST_TO_DEV, DEV_TO_DEV, SIZE };
 //mostly have two addresses which are used as operands.
 class HMCRequest {
    public:
-    HMCRequest(HMCReqType req_type, uint64_t hex_addr1,int vault, uint64_t hex_addr2=0);
+    HMCRequest(HMCReqType req_type, uint64_t hex_addr1,int vault, uint64_t hex_addr2=0,uint64_t hex_addr3=0);
     HMCReqType type;
     uint64_t mem_operand1;
     uint64_t mem_operand2;
+    uint64_t mem_operand3;
     int link;
     int quad;
     int vault;
     int flits;
     bool is_write;
+    //Adding more boolean variables for CIM
+    bool is_read;
     // this exit_time is the time to exit xbar to vaults
     uint64_t exit_time;
 };
@@ -170,6 +173,10 @@ class HMCMemorySystem : public BaseDRAMSystem {
     // used for arbitration
     std::vector<int> link_age_counter_;
     std::vector<int> quad_age_counter_ = {0, 0, 0, 0};
+    //Used to keep track of cim request
+    uint64_t req_id_;
+    std::unordered_map<uint64_t,HMCReqType> id_to_cim_mappings;
+    std::unordered_map<uint64_t,std::vector<int>> clock_cycle_recordings;
 };
 
 }  // namespace dramsim3

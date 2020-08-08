@@ -46,18 +46,29 @@ std::pair<uint64_t, int> Controller::ReturnDoneTrans(uint64_t clk) {
     auto it = return_queue_.begin();
     while (it != return_queue_.end()) {
         if (clk >= it->complete_cycle) {
-            if (it->is_write) {
-                simple_stats_.Increment("num_writes_done");
-            } else {
-                simple_stats_.Increment("num_reads_done");
-                simple_stats_.AddValue("read_latency", clk_ - it->added_cycle);
+            if (it->is_cim != true) {
+                if (it->is_write) {
+                    simple_stats_.Increment("num_writes_done");
+                }
+                else if (it->is_read) {
+                    simple_stats_.Increment("num_reads_done");
+                    simple_stats_.AddValue("read_latency", clk_ - it->added_cycle);
+                }
+                auto pair = std::make_pair(it->addr, it->is_write);
+                it = return_queue_.erase(it);
+                return pair;
             }
-            auto pair = std::make_pair(it->addr, it->is_write);
-            it = return_queue_.erase(it);
-            return pair;
-        } else {
-            ++it;
+            else {
+                if (--cim_transactions[it->req_id] == 0) {
+                    auto pair = std::make_pair(it->req_id, CIM);
+                    it = return_queue_.erase(it);
+                    return pair;
+                }
+                else ++it;
+            }
+
         }
+        ++it;
     }
     return std::make_pair(-1, -1);
 }
@@ -157,13 +168,27 @@ bool Controller::WillAcceptTransaction(uint64_t hex_addr, bool is_write) const {
         return write_buffer_.size() < write_buffer_.capacity();
     }
 }
+//Overloading for CIM
+bool Controller::WillAcceptTransaction(uint64_t hex_addr, int no_of_reads, int no_of_writes) const {
+    if (is_unified_queue_) {
+        return unified_queue_.size()+(no_of_reads+ no_of_writes) < unified_queue_.capacity();
+    }
+    return (read_queue_.size()+ no_of_reads < read_queue_.capacity()) && (write_buffer_.size()+ no_of_writes < write_buffer_.capacity());
+}
 
 bool Controller::AddTransaction(Transaction trans) {
+    /* Modifying this function to simulate CIM operations
+       Steps:
+       Step1: Break down the CIM instructions into individual read and write transactions
+       Step2: Event level simulation of CIM operations
+       Step3: Add the transactions to the return queue
+    */
     trans.added_cycle = clk_;
     simple_stats_.AddValue("interarrival_latency", clk_ - last_trans_clk_);
     last_trans_clk_ = clk_;
-
-    if (trans.is_write) {
+    if (trans.is_write || trans.is_cim_store) {
+        //std::cout << "write\n";
+        trans.is_write = true;
         if (pending_wr_q_.count(trans.addr) == 0) {  // can not merge writes
             pending_wr_q_.insert(std::make_pair(trans.addr, trans));
             if (is_unified_queue_) {
@@ -175,8 +200,10 @@ bool Controller::AddTransaction(Transaction trans) {
         trans.complete_cycle = clk_ + 1;
         return_queue_.push_back(trans);
         return true;
-    } else {  // read
+    } else if(trans.is_read || trans.is_cim_fetch) {  // read
+        //std::cout << "read\n";
         // if in write buffer, use the write buffer value
+        trans.is_read = true;
         if (pending_wr_q_.count(trans.addr) > 0) {
             trans.complete_cycle = clk_ + 1;
             return_queue_.push_back(trans);
@@ -192,6 +219,7 @@ bool Controller::AddTransaction(Transaction trans) {
         }
         return true;
     }
+    return false;//Need to do something to this
 }
 
 void Controller::ScheduleTransaction() {

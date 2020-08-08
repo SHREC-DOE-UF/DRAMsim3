@@ -2,9 +2,12 @@
 
 namespace dramsim3 {
 
-HMCRequest::HMCRequest(HMCReqType req_type, uint64_t hex_addr1, int vault, uint64_t hex_addr2)
-    : type(req_type), mem_operand1(hex_addr1), mem_operand2(hex_addr2), vault(vault) {
+HMCRequest::HMCRequest(HMCReqType req_type, uint64_t hex_addr1, int vault, uint64_t hex_addr2, uint64_t hex_addr3)
+    : type(req_type), mem_operand1(hex_addr1), mem_operand2(hex_addr2), mem_operand3(hex_addr3), vault(vault) {
     is_write = type >= HMCReqType::WR0 && type <= HMCReqType::P_WR256;
+    is_read = type >= HMCReqType::RD0 && type <= HMCReqType::RD256;
+
+    
     // given that vaults could be 16 (Gen1) or 32(Gen2), using % 4
     // to partition vaults to quads
    
@@ -242,12 +245,24 @@ HMCResponse::HMCResponse(uint64_t id, HMCReqType req_type, int dest_link,
             flits = 2;
             break;
         case HMCReqType::CIM_FETCH:
+            type = HMCRespType :: CIM_FETCH_RS;
+            flits = 0;
+            break;
         case HMCReqType::CIM_STORE:
+            type = HMCRespType::CIM_STORE_RS;
+            flits = 0;
+            break;
         case HMCReqType::CIM_ADD:
+            type = HMCRespType::CIM_ADD_RS;
+            flits = 0;
+            break;
         case HMCReqType::CIM_SWAP:
+            type = HMCRespType::CIM_SWAP_RS;
+            flits = 0;
+            break;
         case HMCReqType::CIM_XOR:
-            type = HMCRespType::WR_RS;
-            flits = 1;
+            type = HMCRespType::CIM_XOR_RS;
+            flits = 0;
             break;
         default:
             AbruptExit(__FILE__, __LINE__);
@@ -263,7 +278,8 @@ HMCMemorySystem::HMCMemorySystem(Config &config, const std::string &output_dir,
       logic_clk_(0),
       logic_ps_(0),
       dram_ps_(0),
-      next_link_(0) {
+      next_link_(0),
+      req_id_(0){
     // sanity check, this constructor should only be intialized using HMC
     if (!config_.IsHMC()) {
         std::cerr << "Initialzed an HMC system without an HMC config file!"
@@ -441,47 +457,6 @@ bool HMCMemorySystem::AddTransaction(Transaction& trans) {
     // to be compatible with other protocol we have this interface
     // when using this intreface the size of each transaction will be block_size
     HMCReqType req_type;
-
-    if (trans.is_cim_fetch) {
-    req_type = HMCReqType::CIM_FETCH;
-    int vault = GetChannel(trans.addr);
-    HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
-    return InsertHMCReq(req);
-    }
-    else if (trans.is_cim_store) {
-    req_type = HMCReqType::CIM_STORE;
-    int vault = GetChannel(trans.addr);
-    HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
-    return InsertHMCReq(req);
-    }
-    else if (trans.is_cim_xor) { // Xor requires one cim_fetch and one cim_store operation
-        bool ret = true;
-        req_type = HMCReqType::CIM_FETCH;
-        int vault = GetChannel(trans.addr);
-        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
-        ret = InsertHMCReq(req);
-        req_type = HMCReqType::CIM_STORE;
-        vault = GetChannel(trans.addr);
-        req = new HMCRequest(req_type, trans.addr, vault);
-        ret &= InsertHMCReq(req);
-        return ret;
-    }
-    else if (trans.is_cim_add) { // add requires two cim_fetch and one cim_store operation
-        bool ret = true;
-        req_type = HMCReqType::CIM_FETCH;
-        int vault = GetChannel(trans.addr);
-        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
-        ret = InsertHMCReq(req);
-        req_type = HMCReqType::CIM_FETCH;
-        vault = GetChannel(trans.addr);
-        req = new HMCRequest(req_type, trans.addr, vault);
-        ret &= InsertHMCReq(req);
-        req_type = HMCReqType::CIM_STORE;
-        vault = GetChannel(trans.addr);
-        req = new HMCRequest(req_type, trans.addr, vault);
-        ret &= InsertHMCReq(req);
-        return ret;
-    }
     if (trans.is_write) {
         switch (config_.block_size) {
         case 0:
@@ -506,7 +481,7 @@ bool HMCMemorySystem::AddTransaction(Transaction& trans) {
         }
     }
 
-    else {
+    else if(trans.is_read) {
         switch (config_.block_size) {
         case 0:
             req_type = HMCReqType::RD0;
@@ -529,9 +504,32 @@ bool HMCMemorySystem::AddTransaction(Transaction& trans) {
             break;
         }
     }
-    int vault = GetChannel(trans.addr);
-    HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
-    return InsertHMCReq(req);
+    else {
+        if (trans.is_cim_fetch)
+            req_type = HMCReqType::CIM_FETCH;
+        if (trans.is_cim_store)
+            req_type = HMCReqType::CIM_STORE;
+        if (trans.is_cim_add)
+            req_type = HMCReqType::CIM_ADD;
+        if (trans.is_cim_swap)
+            req_type = HMCReqType::CIM_SWAP;
+        if (trans.is_cim_xor)
+            req_type = HMCReqType::CIM_XOR;
+    }
+    if (trans.is_write || trans.is_read || trans.is_cim_fetch || trans.is_cim_store) {
+        int vault = GetChannel(trans.addr);
+        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
+        return InsertHMCReq(req);
+    }
+    else {
+        int vault = GetChannel(trans.addr);
+        /* Sanity check. Both the mem operands must be in the same vault*/
+        /*if (vault != GetChannel(trans.addr2)) {
+            AbruptExit(__FILE__, __LINE__);
+        }*/
+        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault, trans.addr2);
+        return InsertHMCReq(req);
+    }
 }
 
 /* ****** */
@@ -592,8 +590,26 @@ void HMCMemorySystem::DrainRequests() {
             quad_resp_queues_[i].size() < queue_depth_) {
             HMCRequest *req = quad_req_queues_[i].front();
             if (req->exit_time <= logic_clk_) {
-                if (ctrls_[req->vault]->WillAcceptTransaction(req->mem_operand1,
-                                                              req->is_write)) {
+                /*CIM*/
+                //Check how many read and write transactions a given request requires
+                int no_of_reads = 0, no_of_writes = 0;
+                if (req->is_read || req->type == HMCReqType::CIM_FETCH)
+                    no_of_reads = 1;
+                if (req->is_write || req->type == HMCReqType::CIM_STORE)
+                    no_of_writes = 1;
+                if (req->type == HMCReqType::CIM_ADD) {
+                    no_of_reads = 2;
+                    no_of_writes = 1;
+                }
+                if (req->type == HMCReqType::CIM_SWAP) {
+                    no_of_reads = 2;
+                    no_of_writes = 2;
+                }
+                if (req->type == HMCReqType::CIM_XOR) {
+                    no_of_reads = 2;
+                    no_of_writes = 1;
+                }
+                if (ctrls_[req->vault]->WillAcceptTransaction(req->mem_operand1, no_of_reads, no_of_writes)) {
                     InsertReqToDRAM(req);
                     delete (req);
                     quad_req_queues_[i].erase(quad_req_queues_[i].begin());
@@ -640,15 +656,19 @@ void HMCMemorySystem::DrainResponses() {
     for (int i = 0; i < links_; i++) {
         if (!link_resp_queues_[i].empty()) {
             HMCResponse *resp = link_resp_queues_[i].front();
-            if (resp->exit_time <= logic_clk_) {
-                if (resp->type == HMCRespType::RD_RS) {
-                    read_callback_(resp->resp_id);
-                } else {
-                    write_callback_(resp->resp_id);
+
+
+                if (resp->exit_time <= logic_clk_) {
+                    if (resp->type == HMCRespType::RD_RS) {
+                        read_callback_(resp->resp_id);
+                    }
+                    else {
+                        write_callback_(resp->resp_id);
+                    }
                 }
                 delete (resp);
                 link_resp_queues_[i].erase(link_resp_queues_[i].begin());
-            }
+            
         }
     }
 
@@ -695,7 +715,14 @@ void HMCMemorySystem::DRAMClockTick() {
                 VaultCallback(pair.first);
             } else if (pair.second == 0) {  // read
                 VaultCallback(pair.first);
-            } else {
+            }
+            else if (pair.second == CIM) {
+                VaultCallback(pair.first);
+            }
+            else {
+                //use a map to see if all the transactions have been completed for the given request id;
+                //update the stats file 
+                //std::cout << "Neither read nor write\n";
                 break;
             }
         }
@@ -758,8 +785,93 @@ std::vector<int> HMCMemorySystem::BuildAgeQueue(std::vector<int> &age_counter) {
 }
 
 void HMCMemorySystem::InsertReqToDRAM(HMCRequest *req) {
-    Transaction trans(req->mem_operand1, req->is_write);
-    ctrls_[req->vault]->AddTransaction(trans);
+    std::cout << "";//For some reason the code does not work properly without this 
+    //Transaction trans(req->mem_operand1, req->is_write);
+    /* Rewriting for CIM transactions */
+    //Steps:
+    //1) Break the HMC requests into reads and writes
+    //2) Maintain an ID(req_id_) to keep track of transactions belonging to a particular request.
+    //   This is a global ID. Have to come up with someother way to keep track.
+    if (req->type == HMCReqType::CIM_FETCH || req->type == HMCReqType::CIM_STORE) {
+        //Store => write
+        //Fetch => read
+        int req_id = req_id_;
+        Transaction trans(req->mem_operand1, req->type == HMCReqType::CIM_STORE);
+        trans.is_cim = true;
+        trans.is_cim_fetch = req->type == HMCReqType::CIM_FETCH;
+        trans.is_cim_store = req->type == HMCReqType::CIM_STORE;
+        trans.req_id = req_id;
+        trans.is_cim_add = false;
+        trans.is_cim_xor = false;
+        trans.is_cim_swap = false;
+        ctrls_[req->vault]->cim_transactions[req_id] = 1;
+        ctrls_[req->vault]->AddTransaction(trans);
+        id_to_cim_mappings[req_id] = (req->type == HMCReqType::CIM_FETCH) ? HMCReqType::CIM_FETCH : HMCReqType::CIM_STORE;
+        req_id_++;
+        return;
+    }
+    else if (req->type == HMCReqType::CIM_ADD || req->type == HMCReqType::CIM_XOR) { //2 reads followed by 1 write
+        int req_id = req_id_;
+        uint64_t address;
+        ctrls_[req->vault]->cim_transactions[req_id] = 0;
+        clock_cycle_recordings[req_id].push_back(logic_clk_);
+        for (int i = 0; i < 3; i++) {
+            if (i == 1)
+                address = req->mem_operand1;
+            else if(i == 2)
+                address = req->mem_operand2;
+            else
+                address = req->mem_operand3;
+            Transaction trans(address, i > 1);
+            trans.is_cim_add = req->type == HMCReqType::CIM_ADD;
+            trans.is_cim_xor = req->type == HMCReqType::CIM_XOR;
+            trans.req_id = req_id;
+            trans.is_cim = true;
+            trans.is_cim_fetch = false;
+            trans.is_cim_store = false;
+            trans.is_cim_swap = false;
+            ctrls_[req->vault]->AddTransaction(trans);
+            ctrls_[req->vault]->cim_transactions[req_id]++;
+        }
+        id_to_cim_mappings[req_id] = (req->type == HMCReqType::CIM_ADD) ? HMCReqType::CIM_ADD : HMCReqType::CIM_XOR;
+        req_id_++;
+
+    }
+    else if (req->type == HMCReqType::CIM_SWAP) {
+        int req_id = req_id_;
+        uint64_t address;
+        for (int i = 0; i < 4; i++) {
+            if (i % 2 == 0)
+                address = req->mem_operand1;
+            else
+                address = req->mem_operand2;
+            Transaction trans(address, i > 1);
+            trans.is_cim = true;
+            trans.is_cim_swap = true;
+            trans.is_cim_fetch = trans.is_cim_store = trans.is_cim_add= trans.is_cim_xor=false;
+            trans.req_id = req_id;
+            ctrls_[req->vault]->AddTransaction(trans);
+        }
+        req_id_++;
+    }
+    else if (req->is_write || req->is_read) {
+        Transaction trans(req->mem_operand1, req->is_write);
+        trans.is_cim = false;
+        trans.is_cim_fetch = trans.is_cim_store = trans.is_cim_add = trans.is_cim_xor = trans.is_cim_swap = false;
+        if (req->is_read) {
+            trans.is_write = false;
+            trans.is_read = true;
+        }
+        else {
+            trans.is_write = true;
+            trans.is_read = false;
+        }
+        ctrls_[req->vault]->AddTransaction(trans);
+        return;
+    }
+    else {
+    AbruptExit(__FILE__, __LINE__);
+    }
     return;
 }
 
@@ -768,13 +880,29 @@ void HMCMemorySystem::VaultCallback(uint64_t req_id) {
     // requests the vaults cannot directly talk to the CPU so this callback will
     // be passed to the vaults and is responsible to put the responses back to
     // response queues
+    /*CIM modifications*/
+    //1) Add cim stats
+    //2) Do not send response for CIM Operations
     auto it = resp_lookup_table_.find(req_id);
     HMCResponse *resp = it->second;
-    // all data from dram received, put packet in xbar and return
-    resp_lookup_table_.erase(it);
-    // put it in xbar
-    quad_resp_queues_[resp->quad].push_back(resp);
-    quad_age_counter_[resp->quad] = 1;
+    if (resp->type <= HMCRespType::SIZE) {
+        // all data from dram received, put packet in xbar and return
+        resp_lookup_table_.erase(it);
+        // put it in xbar
+        quad_resp_queues_[resp->quad].push_back(resp);
+        quad_age_counter_[resp->quad] = 1;
+    }
+    else {
+        if (id_to_cim_mappings[req_id] == HMCReqType::CIM_ADD) {
+            clock_cycle_recordings[req_id].push_back(logic_clk_);
+            std::cout << "Add Latency: " << (clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front()) << "\n";
+        }
+        if (id_to_cim_mappings[req_id] == HMCReqType::CIM_XOR) {
+            clock_cycle_recordings[req_id].push_back(logic_clk_);
+            std::cout << "Add Latency: " << (clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front()) << "\n";
+        }
+        
+    }
     return;
 }
 

@@ -40,11 +40,15 @@ std::istream& operator>>(std::istream& is, Transaction& trans) {
     std::unordered_set<std::string> cim_operations = { "CIM_ADD","CIM_SWAP","CIM_XOR" };
     std::string mem_op;
     is >> std::hex >> trans.addr ;
+    trans.addr3 = 0;
     is >> mem_op;
     if (cim_operations_with_two_addresses.count(mem_op) == 1)//Store the second address
         is >> std::hex >> trans.addr2;
+    if(mem_op == "CIM_ADD" || mem_op == "CIM_XOR")
+        is >> std::hex >> trans.addr3;
     is>> std::dec >> trans.added_cycle;
     trans.is_write = write_types.count(mem_op) == 1;
+    trans.is_read = mem_op == "READ";
     trans.is_cim_add = mem_op == "CIM_ADD";
     trans.is_cim_swap = mem_op == "CIM_SWAP";
     trans.is_cim_xor = mem_op == "CIM_XOR";
