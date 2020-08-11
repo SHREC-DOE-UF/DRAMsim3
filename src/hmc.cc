@@ -279,7 +279,7 @@ HMCMemorySystem::HMCMemorySystem(Config &config, const std::string &output_dir,
       logic_ps_(0),
       dram_ps_(0),
       next_link_(0),
-      req_id_(0){
+      req_id_(1000){
     // sanity check, this constructor should only be intialized using HMC
     if (!config_.IsHMC()) {
         std::cerr << "Initialzed an HMC system without an HMC config file!"
@@ -521,13 +521,18 @@ bool HMCMemorySystem::AddTransaction(Transaction& trans) {
         HMCRequest* req = new HMCRequest(req_type, trans.addr, vault);
         return InsertHMCReq(req);
     }
-    else {
+    else if(trans.is_cim_add || trans.is_cim_xor){
         int vault = GetChannel(trans.addr);
         /* Sanity check. Both the mem operands must be in the same vault*/
         /*if (vault != GetChannel(trans.addr2)) {
             AbruptExit(__FILE__, __LINE__);
         }*/
-        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault, trans.addr2);
+        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault, trans.addr2, trans.addr3);
+        return InsertHMCReq(req);
+    }
+    else if (trans.is_cim_swap) {
+        int vault = GetChannel(trans.addr);
+        HMCRequest* req = new HMCRequest(req_type, trans.addr, vault, trans.addr2, trans.addr3);
         return InsertHMCReq(req);
     }
 }
@@ -840,18 +845,27 @@ void HMCMemorySystem::InsertReqToDRAM(HMCRequest *req) {
     else if (req->type == HMCReqType::CIM_SWAP) {
         int req_id = req_id_;
         uint64_t address;
-        for (int i = 0; i < 4; i++) {
-            if (i % 2 == 0)
+        for (int i = 0; i < 2; i++) {
+            if (i == 0) {
                 address = req->mem_operand1;
-            else
+                cim_swap_store_addresses[req_id].first = address;
+            }
+            else {
                 address = req->mem_operand2;
-            Transaction trans(address, i > 1);
+                cim_swap_store_addresses[req_id].second = address;
+            }
+            Transaction trans(address, false); //Read the values, swap happens in the vault callback function
             trans.is_cim = true;
             trans.is_cim_swap = true;
             trans.is_cim_fetch = trans.is_cim_store = trans.is_cim_add= trans.is_cim_xor=false;
             trans.req_id = req_id;
             ctrls_[req->vault]->AddTransaction(trans);
+            ctrls_[req->vault]->cim_transactions[req_id]++;
         }
+        id_to_cim_mappings[req_id] = HMCReqType::CIM_SWAP;
+        cim_swap_call_backs[req_id] = 2;
+        req_to_vault[req_id_] = req->vault;
+        clock_cycle_recordings[req_id].push_back(logic_clk_);
         req_id_++;
     }
     else if (req->is_write || req->is_read) {
@@ -892,17 +906,43 @@ void HMCMemorySystem::VaultCallback(uint64_t req_id) {
         quad_resp_queues_[resp->quad].push_back(resp);
         quad_age_counter_[resp->quad] = 1;
     }
-    else {
-        if (id_to_cim_mappings[req_id] == HMCReqType::CIM_ADD) {
+    else if (id_to_cim_mappings[req_id] == HMCReqType::CIM_ADD || id_to_cim_mappings[req_id] == HMCReqType::CIM_XOR) {
             clock_cycle_recordings[req_id].push_back(logic_clk_);
-            std::cout << "Add Latency: " << (clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front()) << "\n";
+            if (id_to_cim_mappings[req_id] == HMCReqType::CIM_ADD) {
+                std::cout << "Clock Cycles for Add: " << clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front()+ add_delay << "\n";
+            }
+            else {
+                std::cout << "Clock Cycles for Xor: " << clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front()+ xor_delay << "\n";
+            }
         }
-        if (id_to_cim_mappings[req_id] == HMCReqType::CIM_XOR) {
-            clock_cycle_recordings[req_id].push_back(logic_clk_);
-            std::cout << "Add Latency: " << (clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front()) << "\n";
+
+    else if(id_to_cim_mappings[req_id] == HMCReqType::CIM_SWAP) {//The stores are done in the callback
+            if (cim_swap_call_backs[req_id]-- == 2) {
+                //std::cout << "first call back for CiM_SWAP\n";
+                uint64_t address;
+                for (int i = 0; i < 2; i++) {
+                    if (i == 0) {
+                        address = cim_swap_store_addresses[req_id].first;
+                    }
+                    else {
+                        address = cim_swap_store_addresses[req_id].second;
+                    }
+                    Transaction trans(address, false); //Read the values, swap happens in the vault callback function
+                    trans.is_cim = true;
+                    trans.is_cim_swap = true;
+                    trans.is_cim_fetch = trans.is_cim_store = trans.is_cim_add = trans.is_cim_xor = false;
+                    trans.req_id = req_id;
+                    int vault = req_to_vault[req_id];
+                    ctrls_[vault]->AddTransaction(trans);
+                    ctrls_[vault]->cim_transactions[req_id]++;
+                }
+            }
+            else {
+                //std::cout << "second call back for CiM_SWAP\n";
+                clock_cycle_recordings[req_id].push_back(logic_clk_);
+                std::cout << "Clock cycles for CiM_Swap: " << clock_cycle_recordings[req_id].back() - clock_cycle_recordings[req_id].front() << "\n";
+            }
         }
-        
-    }
     return;
 }
 

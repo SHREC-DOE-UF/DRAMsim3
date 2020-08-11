@@ -176,7 +176,12 @@ class HMCMemorySystem : public BaseDRAMSystem {
     //Used to keep track of cim request
     uint64_t req_id_;
     std::unordered_map<uint64_t,HMCReqType> id_to_cim_mappings;
+    std::unordered_map<uint64_t,int> cim_swap_call_backs;
+    std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> cim_swap_store_addresses;
     std::unordered_map<uint64_t,std::vector<int>> clock_cycle_recordings;
+    std::unordered_map<uint64_t,int> req_to_vault;
+    int add_delay = 100;
+    int xor_delay = 30;
 };
 
 }  // namespace dramsim3

@@ -59,7 +59,7 @@ std::pair<uint64_t, int> Controller::ReturnDoneTrans(uint64_t clk) {
                 return pair;
             }
             else {
-                if (--cim_transactions[it->req_id] == 0) {
+                if (cim_transactions[it->req_id]-- == 1) {
                     auto pair = std::make_pair(it->req_id, CIM);
                     it = return_queue_.erase(it);
                     return pair;
