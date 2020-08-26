@@ -182,6 +182,11 @@ class Config {
     double bank_asr;  // the aspect ratio of a bank: #row_bits / #col_bits
 #endif  // THERMAL
 
+  //CiM Parameters
+  int CiM_Add_Delay;
+  int CiM_Xor_Delay;
+  int CiM_Swap_Delay;
+
    private:
     INIReader* reader_;
     void CalculateSize();
@@ -192,6 +197,7 @@ class Config {
     void InitOtherParams();
     void InitPowerParams();
     void InitSystemParams();
+    void InitCiMParams();
 #ifdef THERMAL
     void InitThermalParams();
 #endif  // THERMAL

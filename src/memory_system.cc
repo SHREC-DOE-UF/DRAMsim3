@@ -58,14 +58,20 @@ MemorySystem* GetMemorySystem(const std::string &config_file, const std::string 
 
 /*Rewrting WillAcceptTransaction and AddTransaction for CIM operations in HMC*/
 bool MemorySystem::WillAcceptTransaction(Transaction& trans) const {
-    if (config_->IsHMC())
-        return dram_system_->WillAcceptTransaction(trans);
-    return dram_system_->WillAcceptTransaction(trans.addr, trans.is_write);
+    /*if (config_->IsHMC())
+        return dram_system_->WillAcceptTransaction(trans);*/
+    if (trans.is_write || trans.is_read) {
+        return dram_system_->WillAcceptTransaction(trans.addr,trans.is_write);
+    }
+    return dram_system_->WillAcceptTransaction(trans);
 }
 bool MemorySystem::AddTransaction(Transaction& trans){
-    if (config_->IsHMC())
-        return dram_system_->AddTransaction(trans);
-    return dram_system_->AddTransaction(trans.addr, trans.is_write);
+    /*if (config_->IsHMC())
+        return dram_system_->AddTransaction(trans);*/
+    if (trans.is_write || trans.is_read) {
+        return dram_system_->AddTransaction(trans.addr, trans.is_write);
+    }
+    return dram_system_->AddTransaction(trans);
 }
 
 }  // namespace dramsim3

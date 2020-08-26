@@ -24,6 +24,7 @@ Config::Config(std::string config_file, std::string out_dir)
     InitTimingParams();
     InitPowerParams();
     InitOtherParams();
+    InitCiMParams();
 #ifdef THERMAL
     InitThermalParams();
 #endif  // THERMAL
@@ -342,6 +343,13 @@ void Config::InitTimingParams() {
     read_delay = RL + burst_cycle;
     write_delay = WL + burst_cycle;
     return;
+}
+
+/*Get CiM Parameters*/
+void Config::InitCiMParams() {
+    CiM_Add_Delay = GetInteger("cim", "CiM_Add_Delay", 100);
+    CiM_Xor_Delay = GetInteger("cim", "CiM_Xor_Delay", 30);
+    CiM_Swap_Delay = GetInteger("cim", "CiM_Swap_Delay", 20);
 }
 
 void Config::SetAddressMapping() {

@@ -16,6 +16,12 @@
 
 namespace dramsim3 {
 
+enum class CiMReqType {
+    CiM_Add,
+    CiM_Xor,
+    CiM_Swap
+    };
+
 class BaseDRAMSystem {
    public:
     BaseDRAMSystem(Config &config, const std::string &output_dir,
@@ -42,7 +48,7 @@ class BaseDRAMSystem {
     static int total_channels_;
 
    protected:
-    uint64_t id_;
+    uint64_t req_id_;
     uint64_t last_req_clk_;
     Config &config_;
     Timing timing_;
@@ -63,6 +69,16 @@ class BaseDRAMSystem {
 
 // hmmm not sure this is the best naming...
 class JedecDRAMSystem : public BaseDRAMSystem {
+   std::unordered_map<uint64_t,int> no_of_reads_and_writes_for_cim;
+   std::unordered_map<uint64_t,int> pending_callbacks;
+   std::unordered_map<uint64_t, uint64_t> address_map_for_addxor;
+   std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> address_map_for_swap;
+   std::unordered_map<uint64_t, CiMReqType> req_id_to_cim;
+   std::unordered_map<uint64_t,std::pair<uint64_t,uint64_t>> clock_cycle_record;
+   std::unordered_map<uint64_t, std::vector<uint64_t>> pending_transactions;
+   int CiM_Add_Delay;
+   int CiM_Xor_Delay;
+   int CiM_Swap_Delay;
    public:
     JedecDRAMSystem(Config &config, const std::string &output_dir,
                     std::function<void(uint64_t)> read_callback,
@@ -73,7 +89,8 @@ class JedecDRAMSystem : public BaseDRAMSystem {
     //Overloading for CIM
     bool WillAcceptTransaction(Transaction& trans) const override;
     bool AddTransaction(Transaction& trans) ;
-    
+    void CiM_CallBack(uint64_t req_id);
+    void issue_pending_transactions(uint64_t clk);
     void ClockTick() override;
 };
 

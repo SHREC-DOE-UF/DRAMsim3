@@ -104,9 +104,13 @@ JedecDRAMSystem::JedecDRAMSystem(Config &config, const std::string &output_dir,
     }
 
     ctrls_.reserve(config_.channels);
+    //Get the CiM values from the config file
+    CiM_Add_Delay = config_.CiM_Add_Delay;
+    CiM_Xor_Delay = config_.CiM_Xor_Delay;
+    CiM_Swap_Delay = config_.CiM_Swap_Delay;
     for (auto i = 0; i < config_.channels; i++) {
 #ifdef THERMAL
-        ctrls_.push_back(new Controller(i, config_, timing_, thermal_calc_));
+        ctrls_ctrls_.push_back(new Controller(i, config_, timing_, thermal_calc_));
 #else
         ctrls_.push_back(new Controller(i, config_, timing_));
 #endif  // THERMAL
@@ -121,6 +125,7 @@ JedecDRAMSystem::~JedecDRAMSystem() {
 
 bool JedecDRAMSystem::WillAcceptTransaction(uint64_t hex_addr,
                                             bool is_write) const {
+
     int channel = GetChannel(hex_addr);
     return ctrls_[channel]->WillAcceptTransaction(hex_addr, is_write);
 }
@@ -131,7 +136,6 @@ bool JedecDRAMSystem::AddTransaction(uint64_t hex_addr, bool is_write) {
     address_trace_ << std::hex << hex_addr << std::dec << " "
                    << (is_write ? "WRITE " : "READ ") << clk_ << std::endl;
 #endif
-
     int channel = GetChannel(hex_addr);
     bool ok = ctrls_[channel]->WillAcceptTransaction(hex_addr, is_write);
 
@@ -143,16 +147,108 @@ bool JedecDRAMSystem::AddTransaction(uint64_t hex_addr, bool is_write) {
     last_req_clk_ = clk_;
     return ok;
 }
-//Overloading for CIM. Will always return False since we are not implementing 
-//CIM for memory systems other than HMC
+
+
+/* Overloading for CIM. */
 bool JedecDRAMSystem::WillAcceptTransaction(Transaction& trans) const {
-    return false;
+    int channel_1, channel_2, channel_3;
+    if (trans.is_cim_add  || trans.is_cim_xor) { //CiM_Add or CiM_Xor
+        channel_1 = GetChannel(trans.addr);
+        channel_2 = GetChannel(trans.addr2);
+        channel_3 = GetChannel(trans.addr3);
+        return ctrls_[channel_1]->WillAcceptTransaction(trans.addr, false) && ctrls_[channel_2]->WillAcceptTransaction(trans.addr2, false)
+            && ctrls_[channel_3]->WillAcceptTransaction(trans.addr, true);
+    }
+    if (trans.is_cim_swap) { //CiM_Swap
+        channel_1 = GetChannel(trans.addr);
+        channel_2 = GetChannel(trans.addr2);
+        return ctrls_[channel_1]->WillAcceptTransaction(trans.addr, false) && ctrls_[channel_1]->WillAcceptTransaction(trans.addr, true)
+            && ctrls_[channel_2]->WillAcceptTransaction(trans.addr2, false) && ctrls_[channel_2]->WillAcceptTransaction(trans.addr2, true);
+    }
+    return true;
+}
+/************************************************************/
+
+/*Overloading for CIM*/
+bool JedecDRAMSystem::AddTransaction(Transaction& trans) { 
+#ifdef ADDR_TRACE
+    address_trace_ << std::hex << hex_addr << std::dec << " "
+        << (is_write ? "WRITE " : "READ ") << clk_ << std::endl;
+#endif
+    bool ok = true;
+    if (trans.is_cim_add || trans.is_cim_xor) {
+        int channel_1 = GetChannel(trans.addr);
+        int channel_2 = GetChannel(trans.addr2);
+        int channel_3 = GetChannel(trans.addr3);
+        ok = ctrls_[channel_1]->WillAcceptTransaction(trans.addr, false) && 
+                    ctrls_[channel_2]->WillAcceptTransaction(trans.addr2, false) &&
+                    ctrls_[channel_3]->WillAcceptTransaction(trans.addr3, true);
+        assert(ok);
+        if (ok) {
+            Transaction dram_trans;
+            for (int i = 0; i < 2; i++) {
+                if (i == 0)
+                    dram_trans = Transaction(trans.addr, false); //Issue two fetches
+                else
+                    dram_trans = Transaction(trans.addr2, false);
+                dram_trans.is_cim_add = trans.is_cim_add;
+                dram_trans.is_cim_xor = trans.is_cim_xor;
+                dram_trans.is_cim_swap = false;
+                dram_trans.is_cim = true;
+                dram_trans.req_id = req_id_;
+                if (i == 0)
+                    ctrls_[channel_1]->AddTransaction(dram_trans);
+                else
+                    ctrls_[channel_2]->AddTransaction(dram_trans);
+
+            }
+        }
+        no_of_reads_and_writes_for_cim[req_id_] = 2;
+        pending_callbacks[req_id_] = 2;
+        address_map_for_addxor[req_id_] = trans.addr3;
+        req_id_to_cim[req_id_] = trans.is_cim_add ? CiMReqType::CiM_Add : CiMReqType::CiM_Xor;
+        clock_cycle_record[req_id_].first = clk_;
+        req_id_++;
+    }
+    else if (trans.is_cim_swap) { //2 fetches and 2 stores
+        int channel_1 = GetChannel(trans.addr);
+        int channel_2 = GetChannel(trans.addr2);
+        ok = ctrls_[channel_1]->WillAcceptTransaction(trans.addr, false) &&
+            ctrls_[channel_2]->WillAcceptTransaction(trans.addr2, false) &&
+            ctrls_[channel_1]->WillAcceptTransaction(trans.addr, true) && ctrls_[channel_1]->WillAcceptTransaction(trans.addr2, true);
+        assert(ok);
+        if (ok) {
+            Transaction dram_trans;
+            for (int i = 0; i < 2; i++) {
+                if (i == 0)
+                    dram_trans = Transaction(trans.addr, false); //Issue two fetches
+                else
+                    dram_trans = Transaction(trans.addr2, false);
+                dram_trans.is_cim_add = false;
+                dram_trans.is_cim_xor = false;
+                dram_trans.is_cim_swap = true;
+                dram_trans.is_cim = true;
+                dram_trans.req_id = req_id_;
+                if (i == 0)
+                    ctrls_[channel_1]->AddTransaction(dram_trans);
+                else
+                    ctrls_[channel_2]->AddTransaction(dram_trans);
+
+            }
+        }
+        address_map_for_swap[req_id_].first = trans.addr;
+        address_map_for_swap[req_id_].second = trans.addr2;
+        no_of_reads_and_writes_for_cim[req_id_] = 2;
+        pending_callbacks[req_id_] = 2;
+        req_id_to_cim[req_id_] = CiMReqType::CiM_Swap;
+        clock_cycle_record[req_id_].first = clk_;
+        req_id_++;
+    }
+    last_req_clk_ = clk_;
+    return ok;
 }
 
-bool JedecDRAMSystem::AddTransaction(Transaction& trans) {
-    return false;
-}
-
+/************************************************************/
 void JedecDRAMSystem::ClockTick() {
 
     for (size_t i = 0; i < ctrls_.size(); i++) {
@@ -163,11 +259,20 @@ void JedecDRAMSystem::ClockTick() {
                 write_callback_(pair.first);
             } else if (pair.second == 0) {
                 read_callback_(pair.first);
-            } else {
+            } else if(pair.second == CIM) {
+                no_of_reads_and_writes_for_cim[pair.first]--;
+                if (no_of_reads_and_writes_for_cim[pair.first] == 0) {
+                    CiM_CallBack(pair.first);
+                }
+                else
+                    break;
+            }
+            else {
                 break;
             }
         }
     }
+    issue_pending_transactions(clk_);
     for (size_t i = 0; i < ctrls_.size(); i++) {
         ctrls_[i]->ClockTick();
     }
@@ -178,6 +283,83 @@ void JedecDRAMSystem::ClockTick() {
     }
     return;
 }
+
+/* Call back for CiM Type Transactions*/
+void JedecDRAMSystem::CiM_CallBack(uint64_t req_id) {
+    if (req_id_to_cim[req_id] == CiMReqType::CiM_Add || req_id_to_cim[req_id] == CiMReqType::CiM_Xor || req_id_to_cim[req_id] == CiMReqType::CiM_Swap) {
+        int delay = 0;
+        if (req_id_to_cim[req_id] == CiMReqType::CiM_Add)
+            delay = CiM_Add_Delay;
+        else if (req_id_to_cim[req_id] == CiMReqType::CiM_Xor)
+            delay = CiM_Xor_Delay;
+        else if (req_id_to_cim[req_id] == CiMReqType::CiM_Swap)
+            delay = CiM_Swap_Delay;
+        if (pending_callbacks[req_id] == 2) {
+            pending_transactions[clk_ + delay].push_back(req_id);
+            pending_callbacks[req_id]--;
+        }
+        else if(pending_callbacks[req_id] == 1) {
+            clock_cycle_record[req_id].second = clk_;
+            pending_callbacks[req_id]--;
+            if(req_id_to_cim[req_id] == CiMReqType::CiM_Add)
+            std::cout <<"Request no: "<<req_id<<" type: CiM_Add, no of clock cycles= "
+                <<clock_cycle_record[req_id].second - clock_cycle_record[req_id].first << "\n";
+            else if(req_id_to_cim[req_id] == CiMReqType::CiM_Xor)
+                std::cout << "Request no: " << req_id << " type: CiM_Xor, no of clock cycles= "
+                << clock_cycle_record[req_id].second - clock_cycle_record[req_id].first << "\n";
+            else if(req_id_to_cim[req_id] == CiMReqType::CiM_Swap)
+                std::cout << "Request no: " << req_id << " type: CiM_Swap, no of clock cycles= "
+                << clock_cycle_record[req_id].second - clock_cycle_record[req_id].first << "\n";
+        }
+
+    }
+
+}
+
+void JedecDRAMSystem::issue_pending_transactions(uint64_t clk) {
+    if (pending_transactions[clk].begin() != pending_transactions[clk].end()) {
+        auto it = pending_transactions[clk].begin();
+        while (it != pending_transactions[clk].end()) {
+            uint64_t req_id = *it;
+            if (req_id_to_cim[req_id] == CiMReqType::CiM_Add || req_id_to_cim[req_id] == CiMReqType::CiM_Xor) {
+                uint64_t addr = address_map_for_addxor[req_id];
+                int channel = GetChannel(addr);
+                Transaction trans = Transaction(addr, true);
+                trans.is_cim_add = req_id_to_cim[req_id] == CiMReqType::CiM_Add;
+                trans.is_cim_xor = req_id_to_cim[req_id] == CiMReqType::CiM_Xor;
+                trans.is_cim = true;
+                trans.req_id = req_id;
+                ctrls_[channel]->AddTransaction(trans);
+                no_of_reads_and_writes_for_cim[req_id] = 1;
+            }
+            else {
+                uint64_t addr1 = address_map_for_swap[req_id].first;
+                uint64_t addr2 = address_map_for_swap[req_id].second;
+                int channel1 = GetChannel(addr1);
+                int channel2 = GetChannel(addr2);
+                Transaction trans1 = Transaction(addr1, true);
+                Transaction trans2 = Transaction(addr2, true);
+                trans1.is_cim_add = false;
+                trans2.is_cim_add = false;
+                trans1.is_cim_xor = false;
+                trans2.is_cim_xor = false;
+                trans1.is_cim_swap = true;
+                trans2.is_cim_swap = true;
+                trans1.is_cim = true;
+                trans2.is_cim = true;
+                trans1.req_id = req_id;
+                trans2.req_id = req_id;
+                ctrls_[channel1]->AddTransaction(trans1);
+                ctrls_[channel2]->AddTransaction(trans2);
+                no_of_reads_and_writes_for_cim[req_id] = 2;
+            }
+            it++;
+        }
+
+    }
+
+}
+
 
 IdealDRAMSystem::IdealDRAMSystem(Config &config, const std::string &output_dir,
                                  std::function<void(uint64_t)> read_callback,
@@ -213,5 +395,6 @@ void IdealDRAMSystem::ClockTick() {
     clk_++;
     return;
 }
+
 
 }  // namespace dramsim3
